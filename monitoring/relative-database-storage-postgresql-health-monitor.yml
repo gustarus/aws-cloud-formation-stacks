@@ -1,0 +1,196 @@
+# {@see https://github.com/gustarus/aws-cloud-formation-stacks/services}
+# relative-database-storage-postgresql-health-monitor.yml
+
+Parameters:
+  Identity:
+    Type: String
+    Description: "Database identity."
+  Namespace:
+    Type: String
+    Default: "some-namespace"
+    Description: "Stack namespace to prefix child resources."
+  Title:
+    Type: String
+    Description: "Resource title to prefix child resources."
+  DatabaseBurstBalanceThreshold:
+    Type: Number
+    Default: 20
+    Description: "Database burst balance threshold."
+  DatabaseCPUUtilizationThreshold:
+    Type: Number
+    Default: 80
+    Description: "Database cpu utilization threshold."
+  DatabaseCPUCreditBalanceThreshold:
+    Type: Number
+    Default: 20
+    Description: "Database cpu credit balance threshold."
+  DatabaseDiskQueueDepthThreshold:
+    Type: Number
+    Default: 64
+    Description: "Database disk queue depth threshold."
+  DatabaseFreeableMemoryBytesThreshold:
+    Type: Number
+    Default: 64000000
+    Description: "Database freeable memory threshold in bytes."
+  DatabaseFreeStorageSpaceBytesThreshold:
+    Type: Number
+    Default: 2000000000
+    Description: "Database free storage space left threshold in bytes."
+  DatabaseSwapUsageBytesThreshold:
+    Type: Number
+    Default: 256000000
+    Description: "Database swap usage threshold in bytes."
+  TargetNotificationsTopics:
+    Type: List<String>
+    Description: "Simple notifications service topics arns."
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: "General"
+        Parameters:
+          - Identity
+          - Namespace
+          - Title
+      - Label:
+          default: "Thresholds"
+        Parameters:
+          - DatabaseBurstBalanceThreshold
+          - DatabaseCPUUtilizationThreshold
+          - DatabaseCPUCreditBalanceThreshold
+          - DatabaseDiskQueueDepthThreshold
+          - DatabaseFreeableMemoryBytesThreshold
+          - DatabaseFreeStorageSpaceBytesThreshold
+          - DatabaseSwapUsageBytesThreshold
+      - Label:
+          default: "Actions"
+        Parameters:
+          - TargetNotificationsTopics
+
+Resources:
+  DatabaseBurstBalanceTooLowAlarm:
+    Type: "AWS::CloudWatch::Alarm"
+    Properties:
+      AlarmName: !Sub "${Title} - Postgres - Storage burst too low"
+      AlarmDescription: "Average database storage burst balance over last period too low, expect a significant performance drop soon."
+      AlarmActions: !Ref "TargetNotificationsTopics"
+      OKActions: !Ref "TargetNotificationsTopics"
+      ComparisonOperator: LessThanThreshold
+      Dimensions:
+        - Name: DBInstanceIdentifier
+          Value: !Ref "Identity"
+      EvaluationPeriods: 1
+      MetricName: BurstBalance
+      Namespace: "AWS/RDS"
+      Period: 600
+      Statistic: Average
+      Threshold: !Ref "DatabaseBurstBalanceThreshold"
+
+  DatabaseCPUUtilizationTooHighAlarm:
+    Type: "AWS::CloudWatch::Alarm"
+    Properties:
+      AlarmName: !Sub "${Title} - Postgres - Database cpu utilization too high"
+      AlarmDescription: "Average database CPU utilization over last period too high."
+      AlarmActions: !Ref "TargetNotificationsTopics"
+      OKActions: !Ref "TargetNotificationsTopics"
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: DBInstanceIdentifier
+          Value: !Ref "Identity"
+      EvaluationPeriods: 1
+      MetricName: CPUUtilization
+      Namespace: "AWS/RDS"
+      Period: 600
+      Statistic: Average
+      Threshold: !Ref "DatabaseCPUUtilizationThreshold"
+
+  DatabaseCPUCreditBalanceTooLowAlarm:
+    Type: "AWS::CloudWatch::Alarm"
+    Properties:
+      AlarmName: !Sub "${Title} - Postgres - Database cpu credit balance too low"
+      AlarmDescription: "Average database CPU credit balance over last period too low, expect a significant performance drop soon."
+      AlarmActions: !Ref "TargetNotificationsTopics"
+      OKActions: !Ref "TargetNotificationsTopics"
+      ComparisonOperator: LessThanThreshold
+      Dimensions:
+        - Name: DBInstanceIdentifier
+          Value: !Ref "Identity"
+      EvaluationPeriods: 1
+      MetricName: CPUCreditBalance
+      Namespace: "AWS/RDS"
+      Period: 600
+      Statistic: Average
+      Threshold: !Ref "DatabaseCPUCreditBalanceThreshold"
+
+  DatabaseDiskQueueDepthTooHighAlarm:
+    Type: "AWS::CloudWatch::Alarm"
+    Properties:
+      AlarmName: !Sub "${Title} - Postgres - Database disk queue depth too high"
+      AlarmDescription: "Average database disk queue depth over last period too high, performance may suffer."
+      AlarmActions: !Ref "TargetNotificationsTopics"
+      OKActions: !Ref "TargetNotificationsTopics"
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: DBInstanceIdentifier
+          Value: !Ref "Identity"
+      EvaluationPeriods: 1
+      MetricName: DiskQueueDepth
+      Namespace: "AWS/RDS"
+      Period: 600
+      Statistic: Average
+      Threshold: !Ref "DatabaseDiskQueueDepthThreshold"
+
+  DatabaseFreeableMemoryTooLowAlarm:
+    Type: "AWS::CloudWatch::Alarm"
+    Properties:
+      AlarmName: !Sub "${Title} - Postgres - Database freeable memory too low"
+      AlarmDescription: "Average database freeable memory over last period too low, performance may suffer."
+      AlarmActions: !Ref "TargetNotificationsTopics"
+      OKActions: !Ref "TargetNotificationsTopics"
+      ComparisonOperator: LessThanThreshold
+      Dimensions:
+        - Name: DBInstanceIdentifier
+          Value: !Ref "Identity"
+      EvaluationPeriods: 1
+      MetricName: FreeableMemory
+      Namespace: "AWS/RDS"
+      Period: 600
+      Statistic: Average
+      Threshold: !Ref "DatabaseFreeableMemoryBytesThreshold"
+
+  DatabaseFreeStorageSpaceTooLowAlarm:
+    Type: "AWS::CloudWatch::Alarm"
+    Properties:
+      AlarmName: !Sub "${Title} - Postgres - Database free storage too low"
+      AlarmDescription: "Average database free storage space over last period too low."
+      AlarmActions: !Ref "TargetNotificationsTopics"
+      OKActions: !Ref "TargetNotificationsTopics"
+      ComparisonOperator: LessThanThreshold
+      Dimensions:
+        - Name: DBInstanceIdentifier
+          Value: !Ref "Identity"
+      EvaluationPeriods: 1
+      MetricName: FreeStorageSpace
+      Namespace: "AWS/RDS"
+      Period: 600
+      Statistic: Average
+      Threshold: !Ref "DatabaseFreeStorageSpaceBytesThreshold"
+
+  DatabaseSwapUsageTooHighAlarm:
+    Type: "AWS::CloudWatch::Alarm"
+    Properties:
+      AlarmName: !Sub "${Title} - Postgres - Database swap usage too high"
+      AlarmDescription: "Average database swap usage over last period too high, performance may suffer."
+      AlarmActions: !Ref "TargetNotificationsTopics"
+      OKActions: !Ref "TargetNotificationsTopics"
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: DBInstanceIdentifier
+          Value: !Ref "Identity"
+      EvaluationPeriods: 1
+      MetricName: SwapUsage
+      Namespace: "AWS/RDS"
+      Period: 600
+      Statistic: Average
+      Threshold: !Ref "DatabaseSwapUsageBytesThreshold"

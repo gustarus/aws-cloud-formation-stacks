@@ -1,0 +1,256 @@
+# {@see https://github.com/gustarus/aws-cloud-formation-stacks}
+# elastic-cache-redis-cluster-health-monitor.yml
+
+Parameters:
+  Cluster:
+    Type: String
+    Description: "Redis cluster identity."
+  Namespace:
+    Type: String
+    Default: "some-namespace"
+    Description: "Stack namespace to prefix child resources."
+  Title:
+    Type: String
+    Description: "Resource title to prefix child resources."
+  StorageUtilizationThreshold:
+    Type: Number
+    Default: 80
+    Description: "Redis node storage utilization threshold in percents to trigger alarm."
+  ProcessorUtilizationThreshold:
+    Type: Number
+    Default: 80
+    Description: "Redis node processor utilization threshold in percents to trigger alarm."
+  SwapUsageThreshold:
+    Type: Number
+    Default: 50000000
+    Description: "Redis node swap usage threshold in bytes to trigger alarm."
+  RequestsHitRateThreshold:
+    Type: Number
+    Default: 40
+    Description: "Redis node requests hit rate threshold in percents below which to trigger alarm."
+  RequestLatencyThreshold:
+    Type: Number
+    Default: 25
+    Description: "Redis node requests latency threshold in milliseconds to trigger alarm."
+  CurrentConnectionsThreshold:
+    Type: Number
+    Default: 40000
+    Description: "Redis node current connections threshold (elastic cache has limit of 65000 active connections)."
+  TargetNotificationsTopics:
+    Type: List<String>
+    Description: "Simple notifications service topics arns."
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: 'General'
+        Parameters:
+          - Cluster
+          - Namespace
+          - Title
+      - Label:
+          default: 'Thresholds'
+        Parameters:
+          - StorageUtilizationThreshold
+          - ProcessorUtilizationThreshold
+          - SwapUsageThreshold
+          - RequestsHitRateThreshold
+          - RequestLatencyThreshold
+          - CurrentConnectionsThreshold
+      - Label:
+          default: 'Actions'
+        Parameters:
+          - TargetNotificationsTopics
+
+Resources:
+  StorageUtilizationAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${Title} - Redis - Storage utilization is above the threshold"
+      AlarmDescription: "Alarm if redis storage utilization is above the threshold."
+      AlarmActions: !Ref "TargetNotificationsTopics"
+      OKActions: !Ref "TargetNotificationsTopics"
+      Namespace: "AWS/ElastiCache"
+      MetricName: "DatabaseMemoryUsagePercentage"
+      Dimensions:
+        - Name: "CacheClusterId"
+          Value: !Sub "${Cluster}"
+      Statistic: "Average"
+      ComparisonOperator: "GreaterThanOrEqualToThreshold"
+      Threshold: !Ref "StorageUtilizationThreshold"
+      EvaluationPeriods: 1
+      Period: 300
+      TreatMissingData: "breaching"
+
+  ProcessorUtilizationAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${Title} - Redis - Processor utilization is in the danger zone"
+      AlarmDescription: "Alarm if node processor utilization is in a danger zone."
+      AlarmActions: !Ref "TargetNotificationsTopics"
+      OKActions: !Ref "TargetNotificationsTopics"
+      Namespace: "AWS/ElastiCache"
+      MetricName: "CPUUtilization"
+      Dimensions:
+        - Name: "CacheClusterId"
+          Value: !Sub "${Cluster}"
+      Statistic: "Average"
+      ComparisonOperator: "GreaterThanOrEqualToThreshold"
+      Threshold: !Ref "ProcessorUtilizationThreshold"
+      EvaluationPeriods: 1
+      Period: 300
+      TreatMissingData: "breaching"
+
+  SwapUsageAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${Title} - Redis - Swap usage is above the threshold"
+      AlarmDescription: "Alarm if node swap usage is above the threshold."
+      AlarmActions: !Ref "TargetNotificationsTopics"
+      OKActions: !Ref "TargetNotificationsTopics"
+      Namespace: "AWS/ElastiCache"
+      MetricName: "SwapUsage"
+      Dimensions:
+        - Name: "CacheClusterId"
+          Value: !Sub "${Cluster}"
+      Statistic: "Average"
+      ComparisonOperator: "GreaterThanOrEqualToThreshold"
+      Threshold: !Ref "SwapUsageThreshold"
+      EvaluationPeriods: 1
+      Period: 300
+      TreatMissingData: "breaching"
+
+  EvictionsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${Title} - Redis - Evictions value is above zero"
+      AlarmDescription: "Alarm if redis had to delete something before to put due to memory limits."
+      AlarmActions: !Ref "TargetNotificationsTopics"
+      OKActions: !Ref "TargetNotificationsTopics"
+      Namespace: "AWS/ElastiCache"
+      MetricName: "Evictions"
+      Dimensions:
+        - Name: "CacheClusterId"
+          Value: !Sub "${Cluster}"
+      Statistic: "Average"
+      ComparisonOperator: "GreaterThanOrEqualToThreshold"
+      Threshold: 1
+      EvaluationPeriods: 1
+      Period: 300
+      TreatMissingData: "notBreaching"
+
+  RequestsHitRateAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${Title} - Redis - Requests hit rate value below the threshold"
+      AlarmDescription: "Alarm if redis has issues with the hit/missed rate."
+      AlarmActions: !Ref "TargetNotificationsTopics"
+      OKActions: !Ref "TargetNotificationsTopics"
+      Namespace: "AWS/ElastiCache"
+      MetricName: "CacheHitRate"
+      Dimensions:
+        - Name: "CacheClusterId"
+          Value: !Sub "${Cluster}"
+      Statistic: "Average"
+      ComparisonOperator: "LessThanOrEqualToThreshold"
+      Threshold: !Ref "RequestsHitRateThreshold"
+      EvaluationPeriods: 2
+      Period: 180
+      TreatMissingData: "missing"
+
+  RequestLatencyAlarm:
+    Type: AWS::CloudWatch::CompositeAlarm
+    Properties:
+      AlarmRule: !Sub "ALARM(\"${Title} - Redis - Dependency - GetTypeCmdsLatency\") OR ALARM(\"${Title} - Redis - Dependency - SetTypeCmdsLatency\") OR ALARM(\"${Title} - Redis - Dependency - HashBasedCmdsLatency\") OR ALARM(\"${Title} - Redis - Dependency - StringBasedCmdsLatency\")"
+      AlarmName: !Sub "${Title} - Redis - Requests latency is above the threshold"
+      AlarmDescription: "Alarm if redis process requests too long."
+      AlarmActions: !Ref "TargetNotificationsTopics"
+      OKActions: !Ref "TargetNotificationsTopics"
+
+  RequestLatencyGetAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${Title} - Redis - Dependency - GetTypeCmdsLatency"
+      AlarmDescription: "Alarm if redis process get requests too long."
+      Namespace: "AWS/ElastiCache"
+      MetricName: "GetTypeCmdsLatency"
+      Dimensions:
+        - Name: "CacheClusterId"
+          Value: !Sub "${Cluster}"
+      Statistic: "Average"
+      ComparisonOperator: "GreaterThanOrEqualToThreshold"
+      Threshold: !Ref "RequestLatencyThreshold"
+      EvaluationPeriods: 2
+      Period: 180
+      TreatMissingData: "missing"
+
+  RequestLatencySetAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${Title} - Redis - Dependency - SetTypeCmdsLatency"
+      AlarmDescription: "Alarm if redis process set requests too long."
+      Namespace: "AWS/ElastiCache"
+      MetricName: "SetTypeCmdsLatency"
+      Dimensions:
+        - Name: "CacheClusterId"
+          Value: !Sub "${Cluster}"
+      Statistic: "Average"
+      ComparisonOperator: "GreaterThanOrEqualToThreshold"
+      Threshold: !Ref "RequestLatencyThreshold"
+      EvaluationPeriods: 2
+      Period: 180
+      TreatMissingData: "missing"
+
+  RequestLatencyHashBasedAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${Title} - Redis - Dependency - HashBasedCmdsLatency"
+      AlarmDescription: "Alarm if redis process hash based requests too long."
+      Namespace: "AWS/ElastiCache"
+      MetricName: "HashBasedCmdsLatency"
+      Dimensions:
+        - Name: "CacheClusterId"
+          Value: !Sub "${Cluster}"
+      Statistic: "Average"
+      ComparisonOperator: "GreaterThanOrEqualToThreshold"
+      Threshold: !Ref "RequestLatencyThreshold"
+      EvaluationPeriods: 2
+      Period: 180
+      TreatMissingData: "missing"
+
+  RequestLatencyStringBasedAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${Title} - Redis - Dependency - StringBasedCmdsLatency"
+      AlarmDescription: "Alarm if redis process string based requests too long."
+      Namespace: "AWS/ElastiCache"
+      MetricName: "StringBasedCmdsLatency"
+      Dimensions:
+        - Name: "CacheClusterId"
+          Value: !Sub "${Cluster}"
+      Statistic: "Average"
+      ComparisonOperator: "GreaterThanOrEqualToThreshold"
+      Threshold: !Ref "RequestLatencyThreshold"
+      EvaluationPeriods: 2
+      Period: 180
+      TreatMissingData: "missing"
+
+  CurrentConnectionsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${Title} - Redis - Current connections count above the threshold"
+      AlarmDescription: "Alarm if redis has a lot of connections."
+      AlarmActions: !Ref "TargetNotificationsTopics"
+      OKActions: !Ref "TargetNotificationsTopics"
+      Namespace: "AWS/ElastiCache"
+      MetricName: "CurrConnections"
+      Dimensions:
+        - Name: "CacheClusterId"
+          Value: !Sub "${Cluster}"
+      Statistic: "Average"
+      ComparisonOperator: "GreaterThanOrEqualToThreshold"
+      Threshold: !Ref "CurrentConnectionsThreshold"
+      EvaluationPeriods: 1
+      Period: 300
+      TreatMissingData: "breaching"

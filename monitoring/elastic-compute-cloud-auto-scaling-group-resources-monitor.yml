@@ -1,0 +1,169 @@
+# {@see https://github.com/gustarus/aws-cloud-formation-stacks}
+# elastic-compute-cloud-auto-scaling-group-resources-monitor.yml
+
+Parameters:
+  AutoScalingGroupName:
+    Type: String
+    Description: "EC2 auto scaling group identity."
+  Namespace:
+    Type: String
+    Default: "some-namespace"
+    Description: "Stack namespace to prefix child resources."
+  Title:
+    Type: String
+    Description: "Resource title to prefix child resources."
+  DiskUsageThreshold:
+    Type: Number
+    Default: 80
+    Description: "Group instance disk usage threshold in bytes."
+  DiskUtilizationThreshold:
+    Type: Number
+    Default: 80
+    Description: "Group instance disk utilization threshold in percents."
+  MemoryUtilizationThreshold:
+    Type: Number
+    Default: 80
+    Description: "Group instance memory utilization threshold in percents."
+  CPUUtilizationThreshold:
+    Type: Number
+    Default: 80
+    Description: "Group instance cpu utilization threshold in percents."
+  TargetNotificationsTopics:
+    Type: List<String>
+    Description: "Simple notifications service topics arns."
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: 'General'
+        Parameters:
+          - AutoScalingGroupName
+          - Namespace
+          - Title
+      - Label:
+          default: 'Thresholds'
+        Parameters:
+          - DiskUsageThreshold
+          - DiskUtilizationThreshold
+          - MemoryUtilizationThreshold
+          - CPUUtilizationThreshold
+      - Label:
+          default: 'Actions'
+        Parameters:
+          - TargetNotificationsTopics
+
+Resources:
+  DiskUsageAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${Title} - Instances - Disk usage is above the threshold"
+      AlarmDescription: "Alarm if any of instances reached disk usage threshold."
+      AlarmActions: !Ref "TargetNotificationsTopics"
+      OKActions: !Ref "TargetNotificationsTopics"
+      Namespace: "CWAgent"
+      MetricName: "disk_used"
+      Dimensions:
+        - Name: "AutoScalingGroupName"
+          Value: !Ref "AutoScalingGroupName"
+      Statistic: "Maximum"
+      ComparisonOperator: "GreaterThanOrEqualToThreshold"
+      Threshold: !Ref "DiskUsageThreshold"
+      EvaluationPeriods: 1
+      Period: 300
+      TreatMissingData: "breaching"
+
+  DiskUtilizationAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${Title} - Instances - Disk utilization is above the threshold"
+      AlarmDescription: "Alarm if any of instances reached disk utilization threshold."
+      AlarmActions: !Ref "TargetNotificationsTopics"
+      OKActions: !Ref "TargetNotificationsTopics"
+      Metrics:
+        - Id: "m1"
+          ReturnData: false
+          MetricStat:
+            Metric:
+              Namespace: "CWAgent"
+              MetricName: "disk_total"
+              Dimensions:
+                - Name: "AutoScalingGroupName"
+                  Value: !Ref "AutoScalingGroupName"
+            Stat: "Average"
+            Period: 300
+        - Id: "m2"
+          ReturnData: false
+          MetricStat:
+            Metric:
+              Namespace: "CWAgent"
+              MetricName: "disk_used"
+              Dimensions:
+                - Name: "AutoScalingGroupName"
+                  Value: !Ref "AutoScalingGroupName"
+            Stat: "Maximum"
+            Period: 300
+        - Id: "e1"
+          Expression: "100 * (m2 / m1)"
+          Label: "Expression"
+      ComparisonOperator: "GreaterThanOrEqualToThreshold"
+      Threshold: !Ref "DiskUtilizationThreshold"
+      EvaluationPeriods: 1
+      TreatMissingData: "breaching"
+
+  MemoryUtilizationAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${Title} - Instances - Memory utilization is above the threshold"
+      AlarmDescription: "Alarm if any of instances reached memory utilization threshold."
+      AlarmActions: !Ref "TargetNotificationsTopics"
+      OKActions: !Ref "TargetNotificationsTopics"
+      Metrics:
+        - Id: "m1"
+          ReturnData: false
+          MetricStat:
+            Metric:
+              Namespace: "CWAgent"
+              MetricName: "mem_total"
+              Dimensions:
+                - Name: "AutoScalingGroupName"
+                  Value: !Ref "AutoScalingGroupName"
+            Stat: "Average"
+            Period: 300
+        - Id: "m2"
+          ReturnData: false
+          MetricStat:
+            Metric:
+              Namespace: "CWAgent"
+              MetricName: "mem_used"
+              Dimensions:
+                - Name: "AutoScalingGroupName"
+                  Value: !Ref "AutoScalingGroupName"
+            Stat: "Maximum"
+            Period: 300
+        - Id: "e1"
+          Expression: "100 * (m2 / m1)"
+          Label: "Expression"
+      ComparisonOperator: "GreaterThanOrEqualToThreshold"
+      Threshold: !Ref "MemoryUtilizationThreshold"
+      EvaluationPeriods: 1
+      TreatMissingData: "breaching"
+
+  CPUUtilizationAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${Title} - Instances - Processor utilization is above the threshold"
+      AlarmDescription: "Alarm if any of instances reached cpu utilization threshold."
+      AlarmActions: !Ref "TargetNotificationsTopics"
+      OKActions: !Ref "TargetNotificationsTopics"
+      Namespace: "AWS/EC2"
+      MetricName: "CPUUtilization"
+      Dimensions:
+        - Name: "AutoScalingGroupName"
+          Value: !Ref "AutoScalingGroupName"
+      Statistic: "Average"
+      ComparisonOperator: "GreaterThanOrEqualToThreshold"
+      Threshold: !Ref "CPUUtilizationThreshold"
+      EvaluationPeriods: 1
+      Period: 300
+      TreatMissingData: "breaching"

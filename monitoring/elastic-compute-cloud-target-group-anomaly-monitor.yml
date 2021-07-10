@@ -1,0 +1,75 @@
+# {@see https://github.com/gustarus/aws-cloud-formation-stacks}
+# elastic-compute-cloud-target-group-anomaly-monitor.yml
+
+Parameters:
+  LoadBalancerTargetGroup:
+    Type: String
+    Description: "Load balancer target group to watch for the network. Should be like `targetgroup/awseb-AWSEB-NY0HI3YHDHP/2b3fa21f0365b45d`."
+  Namespace:
+    Type: String
+    Default: "some-namespace"
+    Description: "Resource namespace to prefix child resources."
+  Title:
+    Type: String
+    Description: "Resource title to prefix child resources."
+  RequestsCountAnomalyDetectionThreshold:
+    Type: String
+    Default: 1.2
+    Description: "Requests count anomaly detection band threshold."
+  RequestsCountAnomalyDetectionPeriod:
+    Type: Number
+    Default: 900
+    Description: "Requests count anomaly detection band period."
+  RequestsCountAnomalyDetectionEvaluationPeriods:
+    Type: Number
+    Default: 1
+    Description: "Requests count anomaly detection band evaluation periods."
+  TargetNotificationsTopics:
+    Type: List<String>
+    Description: "Simple notifications service topics arns."
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: 'General'
+        Parameters:
+          - LoadBalancerTargetGroup
+          - Namespace
+          - Title
+      - Label:
+          default: 'Thresholds'
+        Parameters:
+          - RequestsCountAnomalyDetectionThreshold
+          - RequestsCountAnomalyDetectionPeriod
+          - RequestsCountAnomalyDetectionEvaluationPeriods
+      - Label:
+          default: 'Actions'
+        Parameters:
+          - TargetNotificationsTopics
+
+Resources:
+  RequestsCountAnomalyDetectionAlarm:
+    Type: "AWS::CloudWatch::Alarm"
+    Properties:
+      AlarmName: !Sub "${Title} - Target group anomaly detection - Load balancer target group requests anomaly detected"
+      AlarmDescription: "Alarm if requests counter behaviour is strange."
+      AlarmActions: !Ref "TargetNotificationsTopics"
+      OKActions: !Ref "TargetNotificationsTopics"
+      Metrics:
+        - Expression: !Sub "ANOMALY_DETECTION_BAND(m1, ${RequestsCountAnomalyDetectionThreshold})"
+          Id: ad1
+        - Id: m1
+          MetricStat:
+            Metric:
+              MetricName: "RequestCountPerTarget"
+              Namespace: "AWS/ApplicationELB"
+              Dimensions:
+                - Name: "TargetGroup"
+                  Value: !Ref "LoadBalancerTargetGroup"
+            Period: !Ref "RequestsCountAnomalyDetectionPeriod"
+            Stat: "Sum"
+      ThresholdMetricId: ad1
+      ComparisonOperator: "LessThanLowerOrGreaterThanUpperThreshold"
+      EvaluationPeriods: !Ref "RequestsCountAnomalyDetectionEvaluationPeriods"
+      TreatMissingData: "breaching"

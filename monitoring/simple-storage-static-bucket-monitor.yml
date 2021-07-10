@@ -1,0 +1,57 @@
+# {@see https://github.com/gustarus/aws-cloud-formation-stacks}
+# simple-storage-static-bucket-monitor.yml
+
+Parameters:
+  Bucket:
+    Type: String
+    Description: "Target bucket name."
+  Title:
+    Type: String
+    Description: "Resource title to prefix child resources."
+  SizeThreshold:
+    Type: Number
+    Default: 33000000
+    Description: "Bucket size threshold in bytes."
+  TargetNotificationsTopics:
+    Type: List<String>
+    Description: "Simple notifications service topics arns."
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: 'General'
+        Parameters:
+          - Bucket
+          - Namespace
+          - Title
+      - Label:
+          default: 'Thresholds'
+        Parameters:
+          - SizeThreshold
+      - Label:
+          default: 'Actions'
+        Parameters:
+          - TargetNotificationsTopics
+
+Resources:
+  SizeAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${Title} - Bucket page - Bucket size is above the threshold"
+      AlarmDescription: "Alarm if bucket usage is above the limit."
+      AlarmActions: !Ref "TargetNotificationsTopics"
+      OKActions: !Ref "TargetNotificationsTopics"
+      Namespace: "AWS/S3"
+      MetricName: "BucketSizeBytes"
+      Dimensions:
+        - Name: "StorageType"
+          Value: "StandardStorage"
+        - Name: "BucketName"
+          Value: !Sub "${Bucket}"
+      Statistic: "Average"
+      ComparisonOperator: "GreaterThanOrEqualToThreshold"
+      Threshold: !Ref "SizeThreshold"
+      EvaluationPeriods: 1
+      Period: 86400
+      TreatMissingData: "breaching"

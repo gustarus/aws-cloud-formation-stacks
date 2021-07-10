@@ -1,0 +1,134 @@
+# {@see https://github.com/gustarus/aws-cloud-formation-stacks}
+# must be deployed to us-east-1 because of cloudfront
+# public-static-bucket.yml
+
+AWSTemplateFormatVersion: "2010-09-09"
+Parameters:
+  Domain:
+    Type: String
+    Description: "The dns name of an existing Amazon Route 53 hosted zone like `y.x`."
+    AllowedPattern: "(?!-)[a-zA-Z0-9-.]{1,63}(?<!-)"
+    ConstraintDescription: "Must be a valid DNS zone name"
+  Code:
+    Type: String
+    Description: "Site nested domain like `z`: it will create a distribution on `z.y.x`. Leave it empty to use the base domain name as a public dns."
+    AllowedPattern: "(?!-)[a-zA-Z0-9-.]{0,63}(?<!-)"
+    ConstraintDescription: "Must be a valid DNS zone name"
+    Default: ""
+  Bucket:
+    Type: String
+    Description: "Custom bucket name. The stack name will be used if empty."
+    Default: ""
+
+  CMCertificateArn:
+    Type: String
+    Description: "The arn of a certificate stored in iam or acm: `$ aws iam list-server-certificates`."
+
+  DistributionMinTTL:
+    Type: Number
+    Description: "The minimum amount of time that you want objects to stay in cloud front"
+    Default: 0
+
+  DistributionMaxTTL:
+    Type: Number
+    Description: "The maximum amount of time that you want objects to stay in cloud front"
+    Default: 0
+
+  DistributionDefaultTTL:
+    Type: Number
+    Description: "The default amount of time that you want objects to stay in cloud front"
+    Default: 0
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: 'General'
+        Parameters:
+          - Domain
+          - Code
+          - Bucket
+      - Label:
+          default: 'Distribution'
+        Parameters:
+          - CMCertificateArn
+          - DistributionMinTTL
+          - DistributionMaxTTL
+          - DistributionDefaultTTL
+
+Conditions:
+  isGeneralDomain: !Equals [!Ref "Code", ""]
+  isBucketFromStack: !Equals [!Ref "Bucket", ""]
+
+Resources:
+  S3StaticBucket:
+    Type: "AWS::S3::Bucket"
+    Properties:
+      AccessControl: "PublicRead"
+      BucketName: !If [isBucketFromStack, !Ref "AWS::StackName", !Ref "Bucket"]
+      VersioningConfiguration:
+        Status: Suspended
+      WebsiteConfiguration:
+        IndexDocument: "index.html"
+
+  S3StaticBucketPolicy:
+    Type: "AWS::S3::BucketPolicy"
+    Properties:
+      Bucket:
+        Ref: "S3StaticBucket"
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Action:
+              - "s3:GetObject"
+            Effect: "Allow"
+            Resource: !Sub "arn:aws:s3:::${S3StaticBucket}/*"
+            Principal: "*"
+
+  CloudFrontDistribution:
+    Type: "AWS::CloudFront::Distribution"
+    DependsOn: [S3StaticBucket]
+    Properties:
+      DistributionConfig:
+        Aliases: [!If [isGeneralDomain, !Ref "Domain", !Sub "${Code}.${Domain}"]]
+        Enabled: true
+        HttpVersion: "http2"
+        PriceClass: PriceClass_All
+        DefaultCacheBehavior:
+          AllowedMethods: [HEAD, GET]
+          CachedMethods: [HEAD, GET]
+          Compress: true
+          MinTTL: !Ref "DistributionMinTTL"
+          MaxTTL: !Ref "DistributionMaxTTL"
+          DefaultTTL: !Ref "DistributionDefaultTTL"
+          ForwardedValues:
+            Cookies:
+              Forward: none
+            Headers: []
+            QueryString: "false"
+          TargetOriginId: !Sub "S3-${S3StaticBucket}"
+          ViewerProtocolPolicy: "redirect-to-https"
+        DefaultRootObject: "index.html"
+        Origins:
+          - DomainName: !Sub "${S3StaticBucket}.s3.amazonaws.com"
+            Id: !Sub "S3-${S3StaticBucket}"
+            CustomOriginConfig:
+              HTTPPort: 80
+              HTTPSPort: 443
+              OriginProtocolPolicy: "http-only"
+        ViewerCertificate:
+          AcmCertificateArn: !Ref "CMCertificateArn"
+          SslSupportMethod: "sni-only"
+
+  Route53RecordSetGroup:
+    Type: "AWS::Route53::RecordSetGroup"
+    DependsOn: [CloudFrontDistribution]
+    Properties:
+      HostedZoneName: !Sub "${Domain}."
+      RecordSets:
+        - Name: !If [isGeneralDomain, !Ref "Domain", !Sub "${Code}.${Domain}"]
+          Type: A
+          AliasTarget:
+            #  {@see http://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-properties-route53-aliastarget.html}
+            HostedZoneId: Z2FDTNDATAQYW2
+            DNSName: !GetAtt "CloudFrontDistribution.DomainName"

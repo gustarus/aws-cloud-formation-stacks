@@ -1,0 +1,67 @@
+# {@see https://github.com/gustarus/aws-cloud-formation-stacks}
+# dynamo-database-usage-monitor.yml
+
+Parameters:
+  TargetNotificationsTopics:
+    Type: List<String>
+    Description: "Simple notifications service topics arns."
+  SystemErrorsEvaluationPeriods:
+    Type: Number
+    Default: 3
+    Description: "DynamoDB system errors evaluation period to trigger alarm. Single evaluation period is one minute."
+  UserErrorsEvaluationPeriods:
+    Type: Number
+    Default: 2
+    Description: "DynamoDB user errors evaluation period to trigger alarm. Single evaluation period is two minutes."
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: 'Thresholds'
+        Parameters:
+          - SystemErrorsEvaluationPeriods
+          - UserErrorsEvaluationPeriods
+      - Label:
+          default: 'Actions'
+        Parameters:
+          - TargetNotificationsTopics
+
+Resources:
+  SystemErrorsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "DynamoDB - System errors handled"
+      AlarmDescription: "Alarm if dynamo db has a lot of system errors."
+      AlarmActions: !Ref "TargetNotificationsTopics"
+      OKActions: !Ref "TargetNotificationsTopics"
+      Namespace: "AWS/DynamoDB"
+      MetricName: "SystemErrors"
+      Dimensions:
+        - Name: "Operation"
+          Value: "GetRecords"
+      Statistic: "Average"
+      ComparisonOperator: "GreaterThanOrEqualToThreshold"
+      Threshold: 1
+      EvaluationPeriods: !Ref "SystemErrorsEvaluationPeriods"
+      Period: 60
+      TreatMissingData: "notBreaching"
+
+  UserErrorsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "DynamoDB - User errors handled"
+      AlarmDescription: "Alarm if dynamo db has a lot of user errors."
+      AlarmActions: !Ref "TargetNotificationsTopics"
+      OKActions: !Ref "TargetNotificationsTopics"
+      Namespace: "AWS/DynamoDB"
+      MetricName: "UserErrors"
+      Dimensions:
+        - Name: "Operation"
+          Value: "GetRecords"
+      Statistic: "Average"
+      ComparisonOperator: "GreaterThanOrEqualToThreshold"
+      Threshold: 1
+      EvaluationPeriods: !Ref "UserErrorsEvaluationPeriods"
+      Period: 180
+      TreatMissingData: "notBreaching"

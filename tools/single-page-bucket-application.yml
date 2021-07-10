@@ -1,0 +1,267 @@
+# {@see https://github.com/gustarus/aws-cloud-formation-stacks}
+# must be deployed to us-east-1 because of cloudfront
+# single-page-bucket-application.yml
+
+AWSTemplateFormatVersion: "2010-09-09"
+Parameters:
+  Domain:
+    Type: String
+    AllowedPattern: "(?!-)[a-zA-Z0-9-.]{1,63}(?<!-)"
+    Description: "The dns name of an existing Amazon Route 53 hosted zone like `y.x`."
+    ConstraintDescription: "Must be a valid DNS zone name"
+  Code:
+    Type: String
+    Default: ""
+    AllowedPattern: "(?!-)[a-zA-Z0-9-.]{0,63}(?<!-)"
+    Description: "Site nested domain like `z`: it will create a distribution on `z.y.x`. Leave it empty to use the base domain name as a public dns."
+    ConstraintDescription: "Must be a valid DNS zone name"
+
+  CMCertificateArn:
+    Type: String
+    Description: "The arn of a certificate stored in iam or acm: `$ aws iam list-server-certificates`."
+
+  ResponseLambdaVersion:
+    Type: Number
+    Default: 0
+    Description: "Specify cloud front distribution lambda version to use: the lambda should be deployed first to create cloud front distribution"
+
+  ContentSecurityPolicyScriptSrc:
+    Type: String
+    Default: ""
+    Description: "Content security policy response header - `script-src`."
+  ContentSecurityPolicyConnectSrc:
+    Type: String
+    Default: ""
+    Description: "Content security policy response header - `connect-src`."
+  ContentSecurityPolicyStyleSrc:
+    Type: String
+    Default: ""
+    Description: "Content security policy response header - `style-src`."
+  ContentSecurityPolicyImgSrc:
+    Type: String
+    Default: ""
+    Description: "Content security policy response header - `img-src`."
+  ContentSecurityPolicyFontSrc:
+    Type: String
+    Default: ""
+    Description: "Content security policy response header - `font-src`."
+  ContentSecurityPolicyFrameSrc:
+    Type: String
+    Default: ""
+    Description: "Content security policy response header - `frame-src`."
+
+  SecurityHeadersEnabled:
+    Type: String
+    Default: true
+    AllowedValues: [true, false]
+    Description: "Whether security headers enabled or not."
+
+  CacheControlEnabled:
+    Type: String
+    Default: true
+    AllowedValues: [true, false]
+    Description: "Whether cache control enabled or not."
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: "General"
+        Parameters:
+          - Domain
+          - Code
+      - Label:
+          default: "Distribution"
+        Parameters:
+          - CMCertificateArn
+          - CacheControlEnabled
+          - ResponseLambdaVersion
+      - Label:
+          default: "Security"
+        Parameters:
+          - SecurityHeadersEnabled
+          - ContentSecurityPolicyScriptSrc
+          - ContentSecurityPolicyConnectSrc
+          - ContentSecurityPolicyStyleSrc
+          - ContentSecurityPolicyImgSrc
+          - ContentSecurityPolicyFontSrc
+          - ContentSecurityPolicyFrameSrc
+
+Conditions:
+  isGeneralDomain: !Equals [!Ref "Code", ""]
+  isLambdaDeployed: !Not [ !Equals [!Ref "ResponseLambdaVersion", 0] ]
+
+Resources:
+  S3StaticBucket:
+    Type: "AWS::S3::Bucket"
+    Properties:
+      AccessControl: "PublicRead"
+      BucketName: !Ref "AWS::StackName"
+      VersioningConfiguration:
+        Status: Suspended
+      WebsiteConfiguration:
+        IndexDocument: "index.html"
+
+  S3StaticBucketPolicy:
+    Type: "AWS::S3::BucketPolicy"
+    Properties:
+      Bucket:
+        Ref: "S3StaticBucket"
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Action:
+              - "s3:GetObject"
+            Effect: "Allow"
+            Resource: !Sub "arn:aws:s3:::${S3StaticBucket}/*"
+            Principal: "*"
+
+  CloudFrontDistribution:
+    Type: "AWS::CloudFront::Distribution"
+    DependsOn: [S3StaticBucket]
+    Condition: isLambdaDeployed
+    Properties:
+      DistributionConfig:
+        Aliases: [!If [isGeneralDomain, !Ref "Domain", !Sub "${Code}.${Domain}"]]
+        Enabled: true
+        HttpVersion: "http2"
+        PriceClass: PriceClass_All
+        CustomErrorResponses:
+          - ErrorCachingMinTTL: 300
+            ErrorCode: 404
+            ResponseCode: 200
+            ResponsePagePath: "/index.html"
+          - ErrorCachingMinTTL: 300
+            ErrorCode: 403
+            ResponseCode: 200
+            ResponsePagePath: "/index.html"
+        DefaultCacheBehavior:
+          AllowedMethods: [HEAD, GET]
+          CachedMethods: [HEAD, GET]
+          Compress: true
+          ForwardedValues:
+            Cookies:
+              Forward: none
+            Headers: []
+            QueryString: "false"
+          TargetOriginId: !Sub "S3-${S3StaticBucket}"
+          ViewerProtocolPolicy: "redirect-to-https"
+          LambdaFunctionAssociations:
+            - EventType: origin-response
+              LambdaFunctionARN: !Join [":", [!GetAtt "ResponseLambda.Arn", !Ref "ResponseLambdaVersion"]]
+        DefaultRootObject: "index.html"
+        Origins:
+          - DomainName: !Sub "${S3StaticBucket}.s3.amazonaws.com"
+            Id: !Sub "S3-${S3StaticBucket}"
+            CustomOriginConfig:
+              HTTPPort: 80
+              HTTPSPort: 443
+              OriginProtocolPolicy: "http-only"
+        ViewerCertificate:
+          AcmCertificateArn: !Ref "CMCertificateArn"
+          SslSupportMethod: "sni-only"
+
+  Route53RecordSetGroup:
+    Type: "AWS::Route53::RecordSetGroup"
+    DependsOn: [CloudFrontDistribution]
+    Condition: isLambdaDeployed
+    Properties:
+      HostedZoneName: !Sub "${Domain}."
+      RecordSets:
+        - Name: !If [isGeneralDomain, !Ref "Domain", !Sub "${Code}.${Domain}"]
+          Type: A
+          AliasTarget:
+            #  {@see http://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-properties-route53-aliastarget.html}
+            HostedZoneId: Z2FDTNDATAQYW2
+            DNSName: !GetAtt "CloudFrontDistribution.DomainName"
+
+  ResponseLambdaExecutionRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: "Allow"
+            Principal:
+              Service:
+                - "edgelambda.amazonaws.com"
+                - "lambda.amazonaws.com"
+            Action:
+              - "sts:AssumeRole"
+      ManagedPolicyArns:
+        - "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+      Policies:
+        - PolicyName: "inline-policy"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: "Allow"
+                Action:
+                  - "lambda:GetFunction"
+                Resource:
+                  - !Sub "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${AWS::StackName}-response-lambda"
+
+  ResponseLambda:
+    Type: "AWS::Lambda::Function"
+    DependsOn: [ResponseLambdaExecutionRole]
+    Properties:
+      FunctionName: !Sub "${AWS::StackName}-response-lambda"
+      Handler: "index.handler"
+      Role: !GetAtt "ResponseLambdaExecutionRole.Arn"
+      Runtime: "nodejs10.x"
+      Code:
+        ZipFile: !Sub |
+          // prepare lambda flags
+          const isSecurityHeadersEnabled = '${SecurityHeadersEnabled}' === 'true';
+          const isCacheControlEnabled = '${CacheControlEnabled}' === 'true';
+
+          exports.handler = async (event) => {
+            const { request, response } = event.Records[0].cf;
+            const { headers } = response;
+
+            if (isSecurityHeadersEnabled) {
+              headers['strict-transport-security'] = [{ key: 'Strict-Transport-Security', value: 'max-age=63072000; includeSubdomains; preload' }];
+              headers['content-security-policy'] = [{
+                key: 'Content-Security-Policy',
+                value: "default-src 'self' *.${Domain};" +
+                  " img-src 'self' 'unsafe-inline' 'unsafe-eval' *.${Domain} ${ContentSecurityPolicyImgSrc} data: blob:;" +
+                  " script-src 'self' 'unsafe-eval' 'unsafe-inline' *.${Domain} ${ContentSecurityPolicyScriptSrc};" +
+                  " style-src 'self' 'unsafe-inline' *.${Domain} ${ContentSecurityPolicyStyleSrc};" +
+                  " object-src 'none';" +
+                  " font-src 'self' *.${Domain} ${ContentSecurityPolicyFontSrc} data:;" +
+                  " frame-src 'self' *.${Domain} ${ContentSecurityPolicyFrameSrc};" +
+                  " connect-src 'self' *.${Domain} wss://*.${Domain} ${ContentSecurityPolicyConnectSrc};",
+              }];
+              headers['x-content-type-options'] = [{ key: 'X-Content-Type-Options', value: 'nosniff' }];
+              headers['x-frame-options'] = [{ key: 'X-Frame-Options', value: 'DENY' }];
+              headers['x-xss-protection'] = [{ key: 'X-XSS-Protection', value: '1; mode=block' }];
+              headers['referrer-policy'] = [{ key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' }];
+              headers['feature-policy'] = [{
+                key: 'Feature-Policy',
+                value: "geolocation 'none'; midi 'none'; notifications 'none'; " +
+                  "push 'self'; sync-xhr 'self'; microphone 'none'; camera 'none'; " +
+                  "magnetometer 'none'; gyroscope 'none'; speaker 'none'; vibrate 'none'; fullscreen 'none';",
+              }];
+            }
+
+            if (isCacheControlEnabled) {
+              if (request.uri.indexOf("index.html") !== -1) {
+                headers["Cache-Control"] = [{
+                  key: "Cache-Control",
+                  value: "public, max-age=1"
+                }];
+              } else {
+                headers["Cache-Control"] = [{
+                  key: "Cache-Control",
+                  value: "public, max-age=31536000"
+                }];
+              }
+            } else {
+              headers["Cache-Control"] = [{
+                key: "Cache-Control",
+                value: "no-store"
+              }];
+            }
+
+            return response;
+          };

@@ -1,0 +1,29 @@
+# {@see https://github.com/gustarus/aws-cloud-formation-stacks}
+# lambda-errors-monitor.yml
+
+Parameters:
+  TargetNotificationsTopics:
+    Type: List<String>
+    Description: "Simple notifications service topics arns."
+
+Resources:
+  Alarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${Title} - Bucket page - Bucket size is above the threshold"
+      AlarmDescription: "Alarm if bucket usage is above the limit."
+      AlarmActions: !Ref "TargetNotificationsTopics"
+      OKActions: !Ref "TargetNotificationsTopics"
+      Namespace: "AWS/Lambda"
+      MetricName: "Errors"
+      Dimensions:
+        - Name: "StorageType"
+          Value: "StandardStorage"
+        - Name: "BucketName"
+          Value: !Sub "${Bucket}"
+      Statistic: "Average"
+      ComparisonOperator: "GreaterThanOrEqualToThreshold"
+      Threshold: !Ref "SizeThreshold"
+      EvaluationPeriods: 1
+      Period: 86400
+      TreatMissingData: "breaching"
